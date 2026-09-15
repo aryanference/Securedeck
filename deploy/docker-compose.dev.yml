@@ -53,5 +53,33 @@ services:
       auditlog:
         condition: service_started
 
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.gateway
+    environment:
+      - DB_DSN=postgres://securedeck:securedeck_password@postgres:5432/securedeck?sslmode=disable
+      - DB_DIALECT=postgres
+      - PORT=50053
+      - HTTP_PORT=8080
+      - PROXY_PORT=8888
+      - BROKER_ADDR=broker:50052
+      - AUDIT_ADDR=auditlog:50051
+      # KILLSWITCH_ADDR intentionally unset until Phase 3 — an unreachable
+      # kill switch never causes the gateway to fail closed (see
+      # services/gateway/denylist.go), so the gateway runs fine without it
+      # in this dev stack, just with an empty deny list.
+    ports:
+      - "50053:50053" # gRPC (SDK mode)
+      - "8080:8080"   # REST / health / metrics
+      - "8888:8888"   # sidecar transparent proxy
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auditlog:
+        condition: service_started
+      broker:
+        condition: service_started
+
 volumes:
   pgdata:

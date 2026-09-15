@@ -1,0 +1,74 @@
+syntax = "proto3";
+package killswitch.v1;
+
+option go_package = "github.com/aryanference/securedeck/gen/go/killswitch/v1";
+
+import "google/protobuf/timestamp.proto";
+
+// KillSwitchService is deployed on its own trust boundary (SEC-10, SEC-11).
+// Every mutating command must carry a valid Ed25519 operator signature.
+// Read-only calls (GetDenyList, SubscribeDenyList) are how the Policy Gateway
+// learns which agents are suspended/terminated without depending on the
+// gateway's own judgment.
+service KillSwitchService {
+  rpc Suspend(SuspendRequest) returns (SuspendResponse);
+  rpc Terminate(TerminateRequest) returns (TerminateResponse);
+  rpc LockdownAll(LockdownAllRequest) returns (LockdownAllResponse);
+  rpc GetDenyList(GetDenyListRequest) returns (stream DenyListEntry);
+  rpc SubscribeDenyList(SubscribeDenyListRequest) returns (stream DenyListUpdate);
+}
+
+// DenyStatus mirrors the two terminal states an agent can be placed into.
+enum DenyStatus {
+  DENY_STATUS_UNSPECIFIED = 0;
+  DENY_STATUS_SUSPENDED = 1;
+  DENY_STATUS_TERMINATED = 2;
+}
+
+message SuspendRequest {
+  string agent_id = 1;
+  bytes  operator_signature = 2;   // Ed25519 signature over command_payload
+  bytes  command_payload = 3;      // Canonical bytes that were signed: command || agent_id || timestamp
+}
+
+message SuspendResponse {
+  bool   accepted = 1;
+  string reason = 2;               // Populated when accepted = false (bad signature, stale timestamp)
+}
+
+message TerminateRequest {
+  string agent_id = 1;
+  bytes  operator_signature = 2;
+  bytes  command_payload = 3;      // command || agent_id || timestamp
+}
+
+message TerminateResponse {
+  bool   accepted = 1;
+  string reason = 2;
+}
+
+message LockdownAllRequest {
+  bytes operator_signature = 1;
+  bytes command_payload = 2;       // command || timestamp
+}
+
+message LockdownAllResponse {
+  bool   accepted = 1;
+  string reason = 2;
+  int64  agents_affected = 3;
+}
+
+message GetDenyListRequest {}
+
+message DenyListEntry {
+  string agent_id = 1;
+  DenyStatus status = 2;
+  google.protobuf.Timestamp updated_at = 3;
+}
+
+message SubscribeDenyListRequest {}
+
+message DenyListUpdate {
+  DenyListEntry entry = 1;
+  bool is_full_sync_marker = 2; // true = "end of initial dump", client can treat cache as warm
+}

@@ -1,0 +1,49 @@
+syntax = "proto3";
+package gateway.v1;
+
+option go_package = "github.com/aryanference/securedeck/gen/go/gateway/v1";
+
+// PolicyGatewayService is the real-time enforcement point (SEC-01, SEC-03, SEC-04, SEC-08).
+// Every agent action is routed through CheckAction before it is permitted to execute.
+service PolicyGatewayService {
+  rpc CheckAction(CheckActionRequest) returns (CheckActionResponse);
+  rpc UpdatePolicy(UpdatePolicyRequest) returns (UpdatePolicyResponse);           // Admin only
+  rpc UpdateEgressAllowlist(UpdateEgressRequest) returns (UpdateEgressResponse);  // Admin only
+}
+
+message CheckActionRequest {
+  string token = 1;         // Agent's PASETO token
+  string action_type = 2;   // e.g. "http_request", "file_write", "code_execute"
+  string target = 3;        // e.g. URL, file path, command
+  bytes  context = 4;       // Optional JSON metadata
+}
+
+message CheckActionResponse {
+  bool   allowed = 1;
+  string reason = 2;         // Explanation if denied
+  string decision_id = 3;    // Links to audit log entry
+}
+
+message UpdatePolicyRequest {
+  string name = 1;
+  string description = 2;
+  bytes  rules = 3;          // JSON array of rule objects
+  string operator_id = 4;
+}
+
+message UpdatePolicyResponse {
+  string policy_id = 1;
+}
+
+message UpdateEgressRequest {
+  string scope = 1;          // "global" or agent_id
+  string domain = 2;
+  int32  port = 3;           // 0 means "any port"
+  string protocol = 4;       // default "https"
+  string operator_id = 5;
+  bool   remove = 6;         // true removes the entry instead of adding it
+}
+
+message UpdateEgressResponse {
+  bool applied = 1;
+}
