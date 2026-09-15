@@ -1,0 +1,66 @@
+syntax = "proto3";
+package broker.v1;
+
+option go_package = "github.com/aryanference/securedeck/gen/go/broker/v1";
+
+import "google/protobuf/timestamp.proto";
+
+service CredentialBrokerService {
+  rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
+  rpc IssueToken(IssueTokenRequest) returns (IssueTokenResponse);
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+  rpc RevokeAllForAgent(RevokeAllForAgentRequest) returns (RevokeAllForAgentResponse);
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+  rpc MassRevoke(MassRevokeRequest) returns (MassRevokeResponse);  // Called by kill switch
+}
+
+message RegisterAgentRequest {
+  string name = 1;
+  string description = 2;
+  string org_id = 3;
+  repeated string initial_scopes = 4;
+}
+
+message RegisterAgentResponse {
+  string agent_id = 1;
+}
+
+message IssueTokenRequest {
+  string agent_id = 1;
+  repeated string requested_scopes = 2;
+}
+
+message IssueTokenResponse {
+  string token = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message RevokeTokenRequest {
+  string token_id = 1; // The JTI
+  string reason = 2;
+}
+
+message RevokeTokenResponse {}
+
+message RevokeAllForAgentRequest {
+  string agent_id = 1;
+  string reason = 2;
+}
+
+message RevokeAllForAgentResponse {}
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  bool is_valid = 1;
+  string agent_id = 2;
+  repeated string scopes = 3;
+}
+
+message MassRevokeRequest {
+  string reason = 1;
+}
+
+message MassRevokeResponse {}

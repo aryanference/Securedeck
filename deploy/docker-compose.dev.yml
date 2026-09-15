@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: securedeck
+      POSTGRES_PASSWORD: securedeck_password
+      POSTGRES_DB: securedeck
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U securedeck"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  auditlog:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.auditlog
+    environment:
+      - DB_DSN=postgres://securedeck:securedeck_password@postgres:5432/securedeck?sslmode=disable
+      - DB_DIALECT=postgres
+      - PORT=50051
+      - NATS_MODE=embedded
+    ports:
+      - "50051:50051"
+      - "4222:4222" # Embedded NATS port
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  broker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.broker
+    environment:
+      - DB_DSN=postgres://securedeck:securedeck_password@postgres:5432/securedeck?sslmode=disable
+      - DB_DIALECT=postgres
+      - PORT=50052
+      - SIGNING_KEY_PATH=/certs/broker.key
+      - NATS_URL=nats://auditlog:4222
+    ports:
+      - "50052:50052"
+    volumes:
+      - ./certs:/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auditlog:
+        condition: service_started
+
+volumes:
+  pgdata:
