@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	brokerv1 "github.com/aryanference/securedeck/gen/go/broker/v1"
 	ksv1 "github.com/aryanference/securedeck/gen/go/killswitch/v1"
 	"github.com/aryanference/securedeck/internal/db"
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 )
 
@@ -51,7 +53,13 @@ type fakeKillSwitchClient struct {
 
 func newTestDB(t *testing.T) db.DB {
 	t.Helper()
-	database, err := db.NewSQLiteDB("file::memory:?cache=shared&_mutex=full")
+	// A unique named in-memory database per test. Plain "file::memory:" with
+	// cache=shared is process-wide — every test using that literal DSN would
+	// share the same tables and collide on CREATE TABLE. A unique name keeps
+	// cache=shared's multi-connection benefit (needed since database/sql
+	// pools connections) while isolating each test from the others.
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_mutex=full", uuid.New().String())
+	database, err := db.NewSQLiteDB(dsn)
 	if err != nil {
 		t.Fatalf("failed to open in-memory db: %v", err)
 	}
@@ -252,7 +260,8 @@ func TestDomainMatchesWildcard(t *testing.T) {
 // budget (<=50ms p95) by exercising the full allow path against an
 // in-memory SQLite DB and in-process fakes.
 func BenchmarkEnforce(b *testing.B) {
-	database, _ := db.NewSQLiteDB("file::memory:?cache=shared&_mutex=full")
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_mutex=full", uuid.New().String())
+	database, _ := db.NewSQLiteDB(dsn)
 	defer database.Close()
 	ctx := context.Background()
 	database.ExecContext(ctx, `CREATE TABLE policies (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT, rules TEXT NOT NULL, created_by TEXT NOT NULL)`)
