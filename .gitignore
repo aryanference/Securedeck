@@ -1,0 +1,39 @@
+# Binaries
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build cache
+/vendor/
+
+# Generated protobuf (committed intentionally — remove this line to ignore)
+# gen/
+
+# SQLite files
+*.db
+*.sqlite
+
+# TLS certs (never commit real certs)
+/certs/
+*.pem
+*.key
+*.crt
+
+# NATS data dir
+nats-data/
+
+# Env files
+.env
+.env.*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

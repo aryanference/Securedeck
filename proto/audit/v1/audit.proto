@@ -1,0 +1,58 @@
+syntax = "proto3";
+package audit.v1;
+
+option go_package = "github.com/aryanference/securedeck/gen/go/audit/v1";
+
+import "google/protobuf/timestamp.proto";
+
+service AuditLogService {
+  rpc LogEvent(LogEventRequest) returns (LogEventResponse);
+  rpc VerifyChain(VerifyChainRequest) returns (VerifyChainResponse);
+  rpc GetEvents(GetEventsRequest) returns (stream AuditEvent);
+}
+
+message LogEventRequest {
+  string source_service = 1;     // Which service generated this event
+  string event_type = 2;         // e.g. "policy.decision", "token.issued", "kill.triggered"
+  string agent_id = 3;           // Empty if not agent-specific
+  string action = 4;             // What was attempted
+  string outcome = 5;            // "allowed", "denied", "error"
+  bytes  detail = 6;             // JSON payload with event-specific detail
+  google.protobuf.Timestamp timestamp = 7;
+}
+
+message LogEventResponse {
+  string event_id = 1;
+  bytes  entry_hash = 2;         // Hash of this entry in the chain
+  uint64 sequence_number = 3;
+}
+
+message AuditEvent {
+  string event_id = 1;
+  string source_service = 2;
+  string event_type = 3;
+  string agent_id = 4;
+  string action = 5;
+  string outcome = 6;
+  bytes  detail = 7;
+  google.protobuf.Timestamp timestamp = 8;
+  bytes  entry_hash = 9;
+  bytes  prev_hash = 10;
+  uint64 sequence_number = 11;
+}
+
+message VerifyChainRequest {
+  uint64 from_sequence = 1;
+  uint64 to_sequence = 2; // 0 means to latest
+}
+
+message VerifyChainResponse {
+  bool is_valid = 1;
+  int64 broken_at_sequence = 2; // -1 if valid
+}
+
+message GetEventsRequest {
+  string agent_id = 1; // optional filter
+  uint64 from_sequence = 2;
+  uint64 to_sequence = 3;
+}
