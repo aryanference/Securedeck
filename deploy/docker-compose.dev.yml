@@ -1,5 +1,10 @@
 version: '3.8'
 
+networks:
+  app_net:
+  ks_net:
+    internal: true # SEC-10: Isolated network boundary
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -12,10 +17,12 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U securedeck"]
+      test: [ "CMD-SHELL", "pg_isready -U securedeck" ]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - app_net
 
   auditlog:
     build:
@@ -32,6 +39,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - app_net
 
   broker:
     build:
@@ -52,6 +61,8 @@ services:
         condition: service_healthy
       auditlog:
         condition: service_started
+    networks:
+      - app_net
 
   gateway:
     build:
@@ -65,14 +76,11 @@ services:
       - PROXY_PORT=8888
       - BROKER_ADDR=broker:50052
       - AUDIT_ADDR=auditlog:50051
-      # KILLSWITCH_ADDR intentionally unset until Phase 3 — an unreachable
-      # kill switch never causes the gateway to fail closed (see
-      # services/gateway/denylist.go), so the gateway runs fine without it
-      # in this dev stack, just with an empty deny list.
+      - KILLSWITCH_ADDR=killswitch:50053
     ports:
       - "50053:50053" # gRPC (SDK mode)
-      - "8080:8080"   # REST / health / metrics
-      - "8888:8888"   # sidecar transparent proxy
+      - "8080:8080" # REST / health / metrics
+      - "8888:8888" # sidecar transparent proxy
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,6 +88,25 @@ services:
         condition: service_started
       broker:
         condition: service_started
+    networks:
+      - app_net
+      - ks_net
+
+  killswitch:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.killswitch
+    environment:
+      - KS_DB_PATH=/data/killswitch.db
+      - BROKER_ADDR=broker:50052
+    ports:
+      - "50054:50053" # Mapped to 50054 on host machine to avoid conflict with the gateway's gRPC port
+    volumes:
+      - ksdata:/data
+    networks:
+      - ks_net
+      - app_net
 
 volumes:
   pgdata:
+  ksdata:
