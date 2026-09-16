@@ -123,6 +123,23 @@ services:
     networks:
       - app_net
 
+  swarmengine:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.swarmengine
+    environment:
+      - PORT=50056
+      - NATS_URL=nats://auditlog:4222
+    ports:
+      - "50056:50056"
+    depends_on:
+      auditlog:
+        condition: service_started
+    networks:
+      - app_net
+
+
+
 volumes:
   pgdata:
   ksdata:

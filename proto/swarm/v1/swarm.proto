@@ -1,0 +1,21 @@
+syntax = "proto3";
+package swarm.v1;
+
+option go_package = "github.com/aryanference/Securedeck/proto/swarm/v1;swarmv1";
+
+import "google/protobuf/timestamp.proto";
+
+service SwarmEngineService {
+  rpc GetSwarmAlerts(GetSwarmAlertsRequest) returns (stream SwarmAlert);
+}
+
+message GetSwarmAlertsRequest {}
+
+message SwarmAlert {
+  string alert_id = 1;
+  repeated string agent_ids = 2;            // All agents involved in the pattern
+  string pattern_id = 3;                    // Which abuse pattern matched
+  string description = 4;
+  repeated string evidence_event_ids = 5;
+  google.protobuf.Timestamp detected_at = 6;
+}
