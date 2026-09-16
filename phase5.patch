@@ -1,0 +1,388 @@
+From 7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b Mon Sep 17 00:00:00 2001
+From: Aryan Gahlot <aryangahlot50@gmail.com>
+Date: Wed, 16 Sep 2026 10:55:00 +0530
+Subject: [PATCH] phase-5: swarmengine — correlation graph and split-privilege detection
+
+Implements a time-bounded in-memory graph over the NATS JetStream audit log.
+Detects split-privilege data exfiltration across multiple agents (SEC-09).
+
+Refs: SEC-09, Master Spec 3.6
+---
+ cmd/swarmengine/main.go                 |  46 ++++++++++++
+ deploy/docker/Dockerfile.swarmengine    |   8 +++
+ proto/swarm/v1/swarm.proto              |  23 ++++++
+ services/swarmengine/engine.go          |  36 ++++++++++
+ services/swarmengine/graph.go           |  50 +++++++++++++
+ services/swarmengine/patterns.go        |  43 +++++++++++
+ services/swarmengine/subscriber.go      |  54 ++++++++++++++
+ services/swarmengine/swarm_test.go      |  60 ++++++++++++++++
+ 8 files changed, 320 insertions(+)
+ create mode 100644 cmd/swarmengine/main.go
+ create mode 100644 deploy/docker/Dockerfile.swarmengine
+ create mode 100644 proto/swarm/v1/swarm.proto
+ create mode 100644 services/swarmengine/engine.go
+ create mode 100644 services/swarmengine/graph.go
+ create mode 100644 services/swarmengine/patterns.go
+ create mode 100644 services/swarmengine/subscriber.go
+ create mode 100644 services/swarmengine/swarm_test.go
+
+diff --git a/cmd/swarmengine/main.go b/cmd/swarmengine/main.go
+new file mode 100644
+--- /dev/null
++++ b/cmd/swarmengine/main.go
+@@ -0,0 +1,46 @@
++package main
++
++import (
++	"context"
++	"log/slog"
++	"os"
++	"os/signal"
++	"syscall"
++	"time"
++
++	"github.com/aryanference/Securedeck/services/swarmengine"
++)
++
++func main() {
++	slog.Info("Starting Securedeck Swarm Correlation Engine")
++
++	natsURL := os.Getenv("NATS_URL")
++	if natsURL == "" {
++		natsURL = "nats://localhost:4222"
++	}
++
++	// 5-minute sliding window for SEC-09 correlation graph
++	engine := swarmengine.NewEngine(5 * time.Minute)
++	
++	sub, err := swarmengine.NewSubscriber(natsURL, engine)
++	if err != nil {
++		slog.Error("Failed to initialize NATS subscriber", "error", err)
++		os.Exit(1)
++	}
++
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++
++	if err := sub.Start(ctx); err != nil {
++		slog.Error("Failed to start subscriber", "error", err)
++		os.Exit(1)
++	}
++
++	slog.Info("Swarm Correlation Engine running. Subscribed to audit.events.>")
++
++	sigChan := make(chan os.Signal, 1)
++	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
++	<-sigChan
++	
++	slog.Info("Shutting down Swarm Correlation Engine")
++}
+diff --git a/deploy/docker/Dockerfile.swarmengine b/deploy/docker/Dockerfile.swarmengine
+new file mode 100644
+--- /dev/null
++++ b/deploy/docker/Dockerfile.swarmengine
+@@ -0,0 +1,8 @@
++FROM golang:1.21-alpine AS builder
++WORKDIR /src
++COPY . .
++RUN go build -o /bin/swarmengine ./cmd/swarmengine
++
++FROM alpine:latest
++COPY --from=builder /bin/swarmengine /usr/local/bin/
++CMD ["swarmengine"]
+diff --git a/proto/swarm/v1/swarm.proto b/proto/swarm/v1/swarm.proto
+new file mode 100644
+--- /dev/null
++++ b/proto/swarm/v1/swarm.proto
+@@ -0,0 +1,23 @@
++syntax = "proto3";
++package swarm.v1;
++
++option go_package = "github.com/aryanference/Securedeck/proto/swarm/v1;swarmv1";
++
++import "google/protobuf/timestamp.proto";
++
++service SwarmEngineService {
++  rpc GetSwarmAlerts(GetSwarmAlertsRequest) returns (stream SwarmAlert);
++}
++
++message GetSwarmAlertsRequest {}
++
++message SwarmAlert {
++  string alert_id = 1;
++  repeated string agent_ids = 2;            // All agents involved in the pattern
++  string pattern_id = 3;                    // Which abuse pattern matched
++  string description = 4;
++  repeated string evidence_event_ids = 5;
++  google.protobuf.Timestamp detected_at = 6;
++}
+diff --git a/services/swarmengine/engine.go b/services/swarmengine/engine.go
+new file mode 100644
+--- /dev/null
++++ b/services/swarmengine/engine.go
+@@ -0,0 +1,36 @@
++package swarmengine
++
++import (
++	"time"
++
++	auditv1 "github.com/aryanference/Securedeck/proto/audit/v1"
++	swarmv1 "github.com/aryanference/Securedeck/proto/swarm/v1"
++)
++
++type Engine struct {
++	Graph  *Graph
++	Window time.Duration
++}
++
++func NewEngine(window time.Duration) *Engine {
++	return &Engine{
++		Graph:  NewGraph(),
++		Window: window,
++	}
++}
++
++func (e *Engine) ProcessEvent(event *auditv1.AuditEvent) *swarmv1.SwarmAlert {
++	ts := event.Timestamp.AsTime()
++	
++	// 1. Expire old edges that fall outside the correlation window
++	e.Graph.Expire(time.Now().Add(-e.Window))
++	
++	// 2. Add new edge (Agent -> Resource via Action)
++	// Using string(Detail) as a simplified resource identifier for V1
++	targetResource := string(event.Detail)
++	if targetResource == "" { targetResource = "global" }
++	e.Graph.AddEdge(event.AgentId, targetResource, event.Action, ts, event.EventId)
++	
++	// 3. Evaluate multi-agent patterns
++	return EvaluatePatterns(e.Graph, event)
++}
+diff --git a/services/swarmengine/graph.go b/services/swarmengine/graph.go
+new file mode 100644
+--- /dev/null
++++ b/services/swarmengine/graph.go
+@@ -0,0 +1,50 @@
++package swarmengine
++
++import (
++	"sync"
++	"time"
++)
++
++type Edge struct {
++	AgentID    string
++	ResourceID string
++	ActionType string
++	Timestamp  time.Time
++	EventID    string
++}
++
++type Graph struct {
++	mu    sync.RWMutex
++	edges []Edge
++}
++
++func NewGraph() *Graph {
++	return &Graph{edges: make([]Edge, 0)}
++}
++
++func (g *Graph) AddEdge(agentID, resourceID, actionType string, ts time.Time, eventID string) {
++	g.mu.Lock()
++	defer g.mu.Unlock()
++	g.edges = append(g.edges, Edge{agentID, resourceID, actionType, ts, eventID})
++}
++
++func (g *Graph) Expire(before time.Time) {
++	g.mu.Lock()
++	defer g.mu.Unlock()
++	var valid []Edge
++	for _, e := range g.edges {
++		if e.Timestamp.After(before) {
++			valid = append(valid, e)
++		}
++	}
++	g.edges = valid
++}
++
++func (g *Graph) GetEdges() []Edge {
++	g.mu.RLock()
++	defer g.mu.RUnlock()
++	// Return a copy to prevent race conditions during pattern evaluation
++	res := make([]Edge, len(g.edges))
++	copy(res, g.edges)
++	return res
++}
+diff --git a/services/swarmengine/patterns.go b/services/swarmengine/patterns.go
+new file mode 100644
+--- /dev/null
++++ b/services/swarmengine/patterns.go
+@@ -0,0 +1,43 @@
++package swarmengine
++
++import (
++	auditv1 "github.com/aryanference/Securedeck/proto/audit/v1"
++	swarmv1 "github.com/aryanference/Securedeck/proto/swarm/v1"
++	"google.golang.org/protobuf/types/known/timestamppb"
++)
++
++func EvaluatePatterns(g *Graph, newEvent *auditv1.AuditEvent) *swarmv1.SwarmAlert {
++	edges := g.GetEdges()
++	
++	// Pattern V1: Split-privilege data exfiltration (SEC-09)
++	// Agent A reads sensitive data, Agent B writes to network.
++	// If the current event is a read or write, check the graph for its counterpart.
++	
++	isRead := newEvent.Action == "file_read" || newEvent.Action == "data_read"
++	isWrite := newEvent.Action == "network_write" || newEvent.Action == "http_request"
++	
++	if isRead || isWrite {
++		for _, e := range edges {
++			// We only care if a DIFFERENT agent is performing the complementary action
++			if e.AgentID != newEvent.AgentId {
++				eIsRead := e.ActionType == "file_read" || e.ActionType == "data_read"
++				eIsWrite := e.ActionType == "network_write" || e.ActionType == "http_request"
++				
++				if (isRead && eIsWrite) || (isWrite && eIsRead) {
++					return &swarmv1.SwarmAlert{
++						AlertId:          "swarm-alert-" + newEvent.EventId,
++						AgentIds:         []string{newEvent.AgentId, e.AgentID},
++						PatternId:        "split-privilege-exfil",
++						Description:      "Multi-agent split-privilege data exfiltration detected",
++						EvidenceEventIds: []string{newEvent.EventId, e.EventID},
++						DetectedAt:       timestamppb.Now(),
++					}
++				}
++			}
++		}
++	}
++
++	// Additional patterns (Collaborative Scope Escalation, Fan-out Probing) 
++	// would be evaluated sequentially here.
++	return nil
++}
+diff --git a/services/swarmengine/subscriber.go b/services/swarmengine/subscriber.go
+new file mode 100644
+--- /dev/null
++++ b/services/swarmengine/subscriber.go
+@@ -0,0 +1,54 @@
++package swarmengine
++
++import (
++	"context"
++	"log/slog"
++
++	"github.com/nats-io/nats.go"
++	"google.golang.org/protobuf/proto"
++
++	auditv1 "github.com/aryanference/Securedeck/proto/audit/v1"
++)
++
++type Subscriber struct {
++	nc     *nats.Conn
++	js     nats.JetStreamContext
++	engine *Engine
++}
++
++func NewSubscriber(natsURL string, engine *Engine) (*Subscriber, error) {
++	nc, err := nats.Connect(natsURL)
++	if err != nil { return nil, err }
++	
++	js, err := nc.JetStream()
++	if err != nil { return nil, err }
++
++	return &Subscriber{
++		nc:     nc,
++		js:     js,
++		engine: engine,
++	}, nil
++}
++
++func (s *Subscriber) Start(ctx context.Context) error {
++	// Important: Uses a separate durable consumer group ("swarmengine") 
++	// so it doesn't compete with the Drift Detector for events.
++	_, err := s.js.Subscribe("audit.events.>", func(m *nats.Msg) {
++		var event auditv1.AuditEvent
++		if err := proto.Unmarshal(m.Data, &event); err != nil {
++			slog.Error("Failed to unmarshal audit event", "error", err)
++			return
++		}
++
++		if alert := s.engine.ProcessEvent(&event); alert != nil {
++			slog.Warn("Swarm alert generated", "pattern", alert.PatternId, "agents", len(alert.AgentIds))
++			
++			alertBytes, _ := proto.Marshal(alert)
++			// Publish back to NATS for the Compliance/Console services to consume
++			s.js.Publish("alerts.swarm", alertBytes)
++		}
++		
++		m.Ack()
++	}, nats.Durable("swarmengine"), nats.ManualAck())
++	return err
++}
+diff --git a/services/swarmengine/swarm_test.go b/services/swarmengine/swarm_test.go
+new file mode 100644
+--- /dev/null
++++ b/services/swarmengine/swarm_test.go
+@@ -0,0 +1,60 @@
++package swarmengine
++
++import (
++	"testing"
++	"time"
++
++	auditv1 "github.com/aryanference/Securedeck/proto/audit/v1"
++	"google.golang.org/protobuf/types/known/timestamppb"
++)
++
++func TestSplitPrivilegeDetection(t *testing.T) {
++	engine := NewEngine(5 * time.Minute)
++	
++	event1 := &auditv1.AuditEvent{
++		EventId: "ev1", AgentId: "agentA", Action: "file_read", Timestamp: timestamppb.Now(),
++	}
++	event2 := &auditv1.AuditEvent{
++		EventId: "ev2", AgentId: "agentB", Action: "network_write", Timestamp: timestamppb.Now(),
++	}
++	
++	res1 := engine.ProcessEvent(event1)
++	if res1 != nil { t.Fatalf("Expected no alert on first standalone event") }
++	
++	res2 := engine.ProcessEvent(event2)
++	if res2 == nil { t.Fatalf("Expected split-privilege alert on second event [SEC-09]") }
++	if len(res2.AgentIds) != 2 { t.Fatalf("Expected exactly 2 agents involved in correlation") }
++}
++
++func TestFalsePositiveSameAgent(t *testing.T) {
++	engine := NewEngine(5 * time.Minute)
++	
++	event1 := &auditv1.AuditEvent{
++		EventId: "ev1", AgentId: "agentA", Action: "file_read", Timestamp: timestamppb.Now(),
++	}
++	event2 := &auditv1.AuditEvent{
++		EventId: "ev2", AgentId: "agentA", Action: "network_write", Timestamp: timestamppb.Now(),
++	}
++	
++	engine.ProcessEvent(event1)
++	// If the same agent does both, individual Gateway rules catch it, not the Swarm Engine
++	if engine.ProcessEvent(event2) != nil { 
++		t.Fatalf("Expected no alert for the same agent executing both actions") 
++	}
++}
++
++func TestTimeWindowExpiry(t *testing.T) {
++	engine := NewEngine(5 * time.Minute)
++	oldTime := timestamppb.New(time.Now().Add(-10 * time.Minute))
++	
++	event1 := &auditv1.AuditEvent{
++		EventId: "ev1", AgentId: "agentA", Action: "file_read", Timestamp: oldTime,
++	}
++	event2 := &auditv1.AuditEvent{
++		EventId: "ev2", AgentId: "agentB", Action: "network_write", Timestamp: timestamppb.Now(),
++	}
++	
++	engine.ProcessEvent(event1)
++	// The first event is 10 minutes old, the correlation window is 5 minutes.
++	if engine.ProcessEvent(event2) != nil { t.Fatalf("Expected no alert due to time window expiry") }
++}
+-- 
+2.42.0.windows.2
