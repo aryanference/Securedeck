@@ -107,6 +107,22 @@ services:
       - ks_net
       - app_net
 
+  driftdetector:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.driftdetector
+    environment:
+      - DB_DSN=postgres://securedeck:securedeck_password@postgres:5432/securedeck?sslmode=disable
+      - DB_DIALECT=postgres
+      - NATS_URL=nats://auditlog:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auditlog:
+        condition: service_started
+    networks:
+      - app_net
+
 volumes:
   pgdata:
   ksdata:

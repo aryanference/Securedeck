@@ -1,0 +1,34 @@
+syntax = "proto3";
+package drift.v1;
+
+option go_package = "github.com/aryanference/securedeck/gen/go/drift/v1";
+
+import "google/protobuf/timestamp.proto";
+
+service DriftDetectorService {
+  rpc GetDriftAlerts(GetDriftAlertsRequest) returns (stream DriftAlert);
+  rpc RegisterTaskDescription(RegisterTaskRequest) returns (RegisterTaskResponse);
+}
+
+message RegisterTaskRequest {
+  string agent_id = 1;
+  string description = 2;
+  repeated string categories = 3;
+  repeated string keywords = 4;
+}
+
+message RegisterTaskResponse {
+  bool success = 1;
+}
+
+message GetDriftAlertsRequest {}
+
+message DriftAlert {
+  string alert_id = 1;
+  string agent_id = 2;
+  string severity = 3;
+  string rule_id = 4;
+  string description = 5;
+  repeated string evidence_event_ids = 6;
+  google.protobuf.Timestamp detected_at = 7;
+}
