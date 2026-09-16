@@ -1,0 +1,63 @@
+{{define "content"}}
+<div class="container">
+    
+    <!-- Hero / Stats Band -->
+    <div style="margin-bottom: 64px;">
+        <div class="eyebrow">Fleet Overview</div>
+        <div class="bento-grid" style="margin-top: 0;">
+            <div class="span-4 card" style="background: transparent; border: none; padding: 0;">
+                <div class="heading-huge">1,402</div>
+                <div style="color: var(--text-muted); font-size: 14px; margin-top: 8px;">Active Agents</div>
+            </div>
+            <div class="span-4 card" style="background: transparent; border: none; padding: 0;">
+                <div class="heading-huge">99.8%</div>
+                <div style="color: var(--text-muted); font-size: 14px; margin-top: 8px;">Real-time Enforcement Rate</div>
+            </div>
+            <div class="span-4 card" style="background: transparent; border: none; padding: 0;">
+                <div class="heading-huge" style="color: var(--accent);">42</div>
+                <div style="color: var(--text-muted); font-size: 14px; margin-top: 8px;">Intercepted Actions (24h)</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Live Alerts & Service Health -->
+    <div class="bento-grid">
+        <!-- Open Alerts -->
+        <div class="card span-8">
+            <div class="eyebrow">Action Required</div>
+            <h2 class="heading-section" style="font-size: 28px; margin-bottom: 24px;">Recent Drift & Swarm Alerts</h2>
+            
+            <div style="border-top: 1px solid var(--border); padding: 16px 0; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <strong style="font-size: 14px; font-weight: 500;">[SEC-04] Instruction Hijack Attempt</strong>
+                    <div style="font-size: 13px; color: var(--text-muted);">Agent ID: 8f72-a1b9 &middot; 2 mins ago</div>
+                </div>
+                <button class="pill-button secondary" style="padding: 6px 16px; font-size: 12px;">Investigate</button>
+            </div>
+            
+            <div style="border-top: 1px solid var(--border); padding: 16px 0; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <strong style="font-size: 14px; font-weight: 500;">[SEC-09] Split-Privilege Exfiltration</strong>
+                    <div style="font-size: 13px; color: var(--text-muted);">Agents: 4a21-c88f, 9b33-d1e2 &middot; 15 mins ago</div>
+                </div>
+                <button class="pill-button secondary" style="padding: 6px 16px; font-size: 12px;">Investigate</button>
+            </div>
+        </div>
+
+        <!-- Service Health Strip (Dark Inversion) -->
+        <div class="card span-4" style="background-color: var(--bg-dark); color: var(--bg-light); border-color: var(--border-dark);">
+            <div class="eyebrow" style="color: var(--accent);">System Status</div>
+            <h2 class="heading-section" style="font-size: 28px; margin-bottom: 24px;">All systems operational.</h2>
+            
+            <ul style="list-style: none; font-size: 14px; display: flex; flex-direction: column; gap: 12px; color: #E5E2DA;">
+                <li style="display: flex; justify-content: space-between;"><span>Policy Gateway</span> <span style="color: var(--accent);">Online</span></li>
+                <li style="display: flex; justify-content: space-between;"><span>Audit Log</span> <span style="color: var(--accent);">Online</span></li>
+                <li style="display: flex; justify-content: space-between;"><span>Credential Broker</span> <span style="color: var(--accent);">Online</span></li>
+                <li style="display: flex; justify-content: space-between; padding-top: 12px; border-top: 1px solid var(--border-dark);">
+                    <span>Kill Switch (Isolated)</span> <span style="color: var(--accent);">Reachable</span>
+                </li>
+            </ul>
+        </div>
+    </div>
+</div>
+{{end}}
