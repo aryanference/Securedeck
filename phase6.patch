@@ -1,0 +1,342 @@
+From 8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c Mon Sep 17 00:00:00 2001
+From: Aryan Gahlot <aryangahlot50@gmail.com>
+Date: Wed, 16 Sep 2026 19:55:00 +0530
+Subject: [PATCH] phase-6: console — base layout, design system, and dashboard
+
+Implements the zero-dependency Go/HTMX console UI.
+Introduces the Omnea-inspired design system (CSS Grid, huge serifs, hairline borders)
+and Apple-style interaction physics (transform scaling, translucent materials).
+
+Refs: SEC-05, Master Spec 3.7
+---
+ cmd/console/main.go                  |  50 +++++++++++++
+ console/static/css/style.css         | 136 +++++++++++++++++++++++++++++++++++
+ console/templates/dashboard.html     |  64 +++++++++++++++++
+ console/templates/layout.html        |  36 +++++++++
+ deploy/docker/Dockerfile.console     |   8 +++
+ 5 files changed, 294 insertions(+)
+ create mode 100644 cmd/console/main.go
+ create mode 100644 console/static/css/style.css
+ create mode 100644 console/templates/dashboard.html
+ create mode 100644 console/templates/layout.html
+ create mode 100644 deploy/docker/Dockerfile.console
+
+diff --git a/cmd/console/main.go b/cmd/console/main.go
+new file mode 100644
+--- /dev/null
++++ b/cmd/console/main.go
+@@ -0,0 +1,50 @@
++package main
++
++import (
++	"html/template"
++	"log/slog"
++	"net/http"
++	"os"
++)
++
++var templates *template.Template
++
++func init() {
++	// D3 Resolved: Zero external UI dependencies, parsing raw HTML templates
++	templates = template.Must(template.ParseGlob("../../console/templates/*.html"))
++}
++
++func main() {
++	slog.Info("Starting Securedeck Console UI")
++
++	// Serve CSS/JS statics
++	fs := http.FileServer(http.Dir("../../console/static"))
++	http.Handle("/static/", http.StripPrefix("/static/", fs))
++
++	// Dashboard Route
++	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
++		if r.URL.Path != "/" {
++			http.NotFound(w, r)
++			return
++		}
++		
++		// HTMX requests can be optimized here later, but standard layout wraps all for now
++		err := templates.ExecuteTemplate(w, "layout.html", nil)
++		if err != nil {
++			slog.Error("Template error", "error", err)
++			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
++		}
++	})
++
++	port := os.Getenv("PORT")
++	if port == "" {
++		port = "3000"
++	}
++
++	slog.Info("Console running", "url", "http://localhost:"+port)
++	if err := http.ListenAndServe(":"+port, nil); err != nil {
++		slog.Error("Server failed", "error", err)
++		os.Exit(1)
++	}
++}
+diff --git a/console/static/css/style.css b/console/static/css/style.css
+new file mode 100644
+--- /dev/null
++++ b/console/static/css/style.css
+@@ -0,0 +1,136 @@
++@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap');
++
++:root {
++  /* Omnea Palette */
++  --bg-light: #FAF9F6;
++  --bg-dark: #111111;
++  --text-main: #141414;
++  --text-muted: #6B6B6B;
++  --border: #E5E2DA;
++  --border-dark: #333333;
++  --accent: #4A6B53;
++  
++  /* Typography */
++  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
++  --font-serif: 'Instrument Serif', Georgia, serif;
++}
++
++* {
++  box-sizing: border-box;
++  margin: 0;
++  padding: 0;
++}
++
++body {
++  background-color: var(--bg-light);
++  color: var(--text-main);
++  font-family: var(--font-sans);
++  line-height: 1.5;
++  -webkit-font-smoothing: antialiased;
++}
++
++/* Typography Hierarchy */
++.eyebrow {
++  font-size: 11px;
++  text-transform: uppercase;
++  letter-spacing: 0.05em;
++  color: var(--text-muted);
++  font-weight: 600;
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  margin-bottom: 16px;
++}
++.eyebrow::before {
++  content: "•";
++  color: var(--accent);
++}
++
++.heading-huge {
++  font-family: var(--font-serif);
++  font-size: clamp(48px, 6vw, 84px);
++  line-height: 1.05;
++  letter-spacing: -0.02em;
++  font-weight: 400;
++}
++
++.heading-section {
++  font-family: var(--font-serif);
++  font-size: 40px;
++  line-height: 1.1;
++  letter-spacing: -0.01em;
++  font-weight: 400;
++}
++
++/* Translucent Apple-style Header */
++.top-nav {
++  position: sticky;
++  top: 0;
++  z-index: 50;
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++  padding: 16px 32px;
++  background: rgba(250, 249, 246, 0.7);
++  backdrop-filter: blur(20px) saturate(180%);
++  border-bottom: 1px solid var(--border);
++}
++
++.nav-links {
++  display: flex;
++  gap: 32px;
++  font-size: 14px;
++  font-weight: 500;
++}
++
++.nav-links a {
++  color: var(--text-main);
++  text-decoration: none;
++  transition: color 0.2s;
++}
++.nav-links a:hover { color: var(--accent); }
++
++/* Buttons (Apple physics constraints applied) */
++.pill-button {
++  background-color: var(--text-main);
++  color: #fff;
++  border: none;
++  border-radius: 999px;
++  padding: 10px 24px;
++  font-size: 14px;
++  font-weight: 500;
++  cursor: pointer;
++  transition: transform 100ms ease-out, background-color 0.2s;
++}
++.pill-button:active {
++  transform: scale(0.97); /* Direct manipulation feedback */
++}
++.pill-button.secondary {
++  background-color: transparent;
++  color: var(--text-main);
++  border: 1px solid var(--border);
++}
++.pill-button.danger { background-color: #8B2C2C; color: #fff; }
++
++/* Bento Grid System */
++.container {
++  max-width: 1400px;
++  margin: 0 auto;
++  padding: 64px 32px;
++}
++.bento-grid {
++  display: grid;
++  grid-template-columns: repeat(12, 1fr);
++  gap: 16px;
++  margin-top: 32px;
++}
++.card {
++  background: var(--bg-light);
++  border: 1px solid var(--border);
++  border-radius: 12px;
++  padding: 24px;
++}
++.span-4 { grid-column: span 4; }
++.span-8 { grid-column: span 8; }
++.span-12 { grid-column: span 12; }
+diff --git a/console/templates/dashboard.html b/console/templates/dashboard.html
+new file mode 100644
+--- /dev/null
++++ b/console/templates/dashboard.html
+@@ -0,0 +1,64 @@
++{{define "content"}}
++<div class="container">
++    
++    <!-- Hero / Stats Band -->
++    <div style="margin-bottom: 64px;">
++        <div class="eyebrow">Fleet Overview</div>
++        <div class="bento-grid" style="margin-top: 0;">
++            <div class="span-4 card" style="background: transparent; border: none; padding: 0;">
++                <div class="heading-huge">1,402</div>
++                <div style="color: var(--text-muted); font-size: 14px; margin-top: 8px;">Active Agents</div>
++            </div>
++            <div class="span-4 card" style="background: transparent; border: none; padding: 0;">
++                <div class="heading-huge">99.8%</div>
++                <div style="color: var(--text-muted); font-size: 14px; margin-top: 8px;">Real-time Enforcement Rate</div>
++            </div>
++            <div class="span-4 card" style="background: transparent; border: none; padding: 0;">
++                <div class="heading-huge" style="color: var(--accent);">42</div>
++                <div style="color: var(--text-muted); font-size: 14px; margin-top: 8px;">Intercepted Actions (24h)</div>
++            </div>
++        </div>
++    </div>
++
++    <!-- Live Alerts & Service Health -->
++    <div class="bento-grid">
++        <!-- Open Alerts -->
++        <div class="card span-8">
++            <div class="eyebrow">Action Required</div>
++            <h2 class="heading-section" style="font-size: 28px; margin-bottom: 24px;">Recent Drift & Swarm Alerts</h2>
++            
++            <div style="border-top: 1px solid var(--border); padding: 16px 0; display: flex; justify-content: space-between; align-items: center;">
++                <div>
++                    <strong style="font-size: 14px; font-weight: 500;">[SEC-04] Instruction Hijack Attempt</strong>
++                    <div style="font-size: 13px; color: var(--text-muted);">Agent ID: 8f72-a1b9 &middot; 2 mins ago</div>
++                </div>
++                <button class="pill-button secondary" style="padding: 6px 16px; font-size: 12px;">Investigate</button>
++            </div>
++            
++            <div style="border-top: 1px solid var(--border); padding: 16px 0; display: flex; justify-content: space-between; align-items: center;">
++                <div>
++                    <strong style="font-size: 14px; font-weight: 500;">[SEC-09] Split-Privilege Exfiltration</strong>
++                    <div style="font-size: 13px; color: var(--text-muted);">Agents: 4a21-c88f, 9b33-d1e2 &middot; 15 mins ago</div>
++                </div>
++                <button class="pill-button secondary" style="padding: 6px 16px; font-size: 12px;">Investigate</button>
++            </div>
++        </div>
++
++        <!-- Service Health Strip (Dark Inversion) -->
++        <div class="card span-4" style="background-color: var(--bg-dark); color: var(--bg-light); border-color: var(--border-dark);">
++            <div class="eyebrow" style="color: var(--accent);">System Status</div>
++            <h2 class="heading-section" style="font-size: 28px; margin-bottom: 24px;">All systems operational.</h2>
++            
++            <ul style="list-style: none; font-size: 14px; display: flex; flex-direction: column; gap: 12px; color: #E5E2DA;">
++                <li style="display: flex; justify-content: space-between;"><span>Policy Gateway</span> <span style="color: var(--accent);">Online</span></li>
++                <li style="display: flex; justify-content: space-between;"><span>Audit Log</span> <span style="color: var(--accent);">Online</span></li>
++                <li style="display: flex; justify-content: space-between;"><span>Credential Broker</span> <span style="color: var(--accent);">Online</span></li>
++                <li style="display: flex; justify-content: space-between; padding-top: 12px; border-top: 1px solid var(--border-dark);">
++                    <span>Kill Switch (Isolated)</span> <span style="color: var(--accent);">Reachable</span>
++                </li>
++            </ul>
++        </div>
++    </div>
++</div>
++{{end}}
+diff --git a/console/templates/layout.html b/console/templates/layout.html
+new file mode 100644
+--- /dev/null
++++ b/console/templates/layout.html
+@@ -0,0 +1,36 @@
++<!DOCTYPE html>
++<html lang="en">
++<head>
++    <meta charset="UTF-8">
++    <meta name="viewport" content="width=device-width, initial-scale=1.0">
++    <title>Securedeck Console</title>
++    <link rel="stylesheet" href="/static/css/style.css">
++    <!-- HTMX for SPA navigation without JS frameworks -->
++    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
++</head>
++<body hx-boost="true">
++    
++    <header class="top-nav">
++        <div style="font-weight: 600; font-size: 18px; letter-spacing: -0.02em;">
++            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-right: 8px; vertical-align: middle;">
++                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
++            </svg>
++            Securedeck
++        </div>
++        
++        <nav class="nav-links">
++            <a href="/">Dashboard</a>
++            <a href="/agents">Agent Fleet</a>
++            <a href="/policies">Policies</a>
++            <a href="/audit">Audit Log</a>
++        </nav>
++        
++        <div>
++            <a href="/killswitch" class="pill-button danger" style="text-decoration: none;">Kill Switch</a>
++        </div>
++    </header>
++
++    <main id="main-content">
++        {{template "content" .}}
++    </main>
++</body>
++</html>
+diff --git a/deploy/docker/Dockerfile.console b/deploy/docker/Dockerfile.console
+new file mode 100644
+--- /dev/null
++++ b/deploy/docker/Dockerfile.console
+@@ -0,0 +1,8 @@
++FROM golang:1.21-alpine AS builder
++WORKDIR /src
++COPY . .
++RUN go build -o /bin/console ./cmd/console
++
++FROM alpine:latest
++COPY --from=builder /bin/console /usr/local/bin/
++CMD ["console"]
+-- 
+2.42.0.windows.2

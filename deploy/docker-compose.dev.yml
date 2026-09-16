@@ -138,7 +138,21 @@ services:
     networks:
       - app_net
 
-
+  console:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.console
+    environment:
+      - PORT=3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../../console:/src/console # Mounts local directory for hot-reloading templates during dev
+    depends_on:
+      auditlog:
+        condition: service_started
+    networks:
+      - app_net
 
 volumes:
   pgdata:
